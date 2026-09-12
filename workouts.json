@@ -18,6 +18,6 @@
     { "id": "push_legs", "name": "Push",            "intervals": [{ "ex": "pushups", "sets": 5 },    { "ex": "pike_pushups", "sets": 5 }] },
     { "id": "core",      "name": "Core",            "intervals": [{ "ex": "hollow_man", "sets": 5 }, { "ex": "shoulder_taps", "sets": 5 }] },
     { "id": "pull_dip",  "name": "Pull & Dip",      "intervals": [{ "ex": "pull_ups", "sets": 5 },   { "ex": "bar_dips", "sets": 5 }] },
-    { "id": "legs",      "name": "Squats & Shrimp", "intervals": [{ "ex": "squats", "sets": 5 },     { "ex": "shrimp_squats", "sets": 5 }] }
+    { "id": "legs",      "name": "Legs",            "intervals": [{ "ex": "squats", "sets": 5 },     { "ex": "shrimp_squats", "sets": 5 }] }
   ]
 }
