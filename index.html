@@ -500,7 +500,14 @@ document.addEventListener('keydown', e => {
   }
 });
 
-if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js');
+if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
+  navigator.serviceWorker.register('sw.js');
+  // When a newer version takes over, reload once so the running app isn't left on the old code.
+  let reloading = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!reloading && navigator.serviceWorker.controller) { reloading = true; location.reload(); }
+  });
+}
 load();
 </script>
 </body>

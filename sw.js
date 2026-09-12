@@ -1,6 +1,6 @@
 // Network-first: edits pushed to GitHub show up on next open; cached copy is used offline.
-const CACHE = 'zaryadka-v4';
-const ASSETS = ['./', './index.html', './workouts.json', './manifest.webmanifest', './icon.svg', './icon-192.png', './icon-512.png', './icon-maskable-512.png'];
+const CACHE = 'zaryadka-v5';
+const ASSETS = ['./', './index.html', './workouts.json', './manifest.webmanifest', './icon.svg', './icon-192.png', './icon-512.png', './icon-maskable-v2-512.png'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)));
@@ -13,10 +13,13 @@ self.addEventListener('activate', e => {
 });
 
 self.addEventListener('fetch', e => {
-  if (e.request.method !== 'GET' || new URL(e.request.url).origin !== location.origin) return;
+  const req = e.request;
+  if (req.method !== 'GET' || new URL(req.url).origin !== location.origin) return;
+  // cache: 'no-cache' revalidates with the server (cheap 304s) instead of reusing the browser's HTTP cache,
+  // which GitHub Pages lets serve for 10 minutes — that's what made a fresh launch show the old app.
   e.respondWith(
-    fetch(e.request)
-      .then(r => { const copy = r.clone(); caches.open(CACHE).then(c => c.put(e.request, copy)); return r; })
-      .catch(() => caches.match(e.request, { ignoreSearch: true }))
+    fetch(req.url, { cache: 'no-cache', credentials: 'same-origin' })
+      .then(r => { if (r.ok) { const copy = r.clone(); caches.open(CACHE).then(c => c.put(req.url, copy)); } return r; })
+      .catch(() => caches.match(req, { ignoreSearch: true }))
   );
 });
