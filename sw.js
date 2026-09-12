@@ -1,6 +1,6 @@
 // Network-first: edits pushed to GitHub show up on next open; cached copy is used offline.
-const CACHE = 'boris-v3';
-const ASSETS = ['./', './index.html', './workouts.json', './manifest.webmanifest', './icon.svg', './icon-192.png', './icon-512.png'];
+const CACHE = 'zaryadka-v4';
+const ASSETS = ['./', './index.html', './workouts.json', './manifest.webmanifest', './icon.svg', './icon-192.png', './icon-512.png', './icon-maskable-512.png'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)));

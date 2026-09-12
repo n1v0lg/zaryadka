@@ -7,7 +7,6 @@ After any edit, run `python3 check.py` — it validates the file and prints each
 
 ```jsonc
 {
-  "name": "Zaryadka",      // app name shown in the header and tab; also set short_name in manifest.webmanifest (home-screen label)
   "work": 30,            // default seconds for "hold" sets (also the time estimate for "reps" sets)
   "rest": 30,            // default rest seconds after each set (no rest after the last set)
   "prep": 10,            // "get ready" countdown before the first set
@@ -46,6 +45,7 @@ Override precedence (most specific wins): interval → exercise → workout → 
 - Exercise ids: lowercase `snake_case`. Don't rename or reuse existing workout ids — history refers to them.
 - Exercises show only their name — don't add form cues or descriptions.
 - Workouts form a queue in list order: finishing or skipping one moves to the next (tracked per device). Removing or reordering is fine.
+- The app name lives in `index.html` and `manifest.webmanifest`, not here.
 - Only `workouts.json` needs to change to add exercises or workouts. Commit and push; GitHub Pages redeploys in about a minute.
 
 ## Workout log format (exported by the app, "Export log")

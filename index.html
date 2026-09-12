@@ -28,7 +28,7 @@
   #home, #done { max-width: 440px; margin: 0 auto; min-height: 100%; display: flex; flex-direction: column; gap: 32px;
                  padding: calc(env(safe-area-inset-top) + 24px) 24px calc(env(safe-area-inset-bottom) + 24px); }
   header { display: flex; justify-content: space-between; align-items: baseline; }
-  .brand { font: 700 26px/1 var(--display); letter-spacing: .08em; text-transform: uppercase; }
+  .brand { color: var(--work); font: 700 26px/1 var(--display); letter-spacing: .08em; text-transform: uppercase; }
   .go { display: flex; flex-direction: column; align-items: center; gap: 12px; }
   .acts { display: flex; gap: 22px; }
   .acts button { font-size: 14px; color: var(--mute); padding: 8px 4px; }
@@ -84,7 +84,7 @@
 <body>
 
 <main id="home">
-  <header><span class="brand" id="brand">Zaryadka</span></header>
+  <header><span class="brand">Zaryadka</span></header>
   <section>
     <div class="tag">Up next</div>
     <h1 id="wname">…</h1>
@@ -224,7 +224,6 @@ async function load() {
     const errs = validate(c);
     if (errs.length) throw new Error(errs.join('\n'));
     cfg = c;
-    if (cfg.name) document.title = $('#brand').textContent = cfg.name;
   } catch (e) {
     $('#err').textContent = e.message; $('#err').hidden = false; $('#start').hidden = true; $('#wname').textContent = 'Config error';
     renderHistory(); renderFooter();
@@ -449,7 +448,7 @@ function finish() {
 /* ---------- log import/export ---------- */
 function exportLog() {
   const blob = new Blob([JSON.stringify({ app: 'zaryadka', exported: new Date().toISOString(), log: store.get('log', []) }, null, 2)], { type: 'application/json' });
-  const a = el('a'); a.href = URL.createObjectURL(blob); a.download = `${((cfg && cfg.name) || 'zaryadka').toLowerCase().replace(/\W+/g, '-')}-log-${isoDay()}.json`;
+  const a = el('a'); a.href = URL.createObjectURL(blob); a.download = `zaryadka-log-${isoDay()}.json`;
   document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
 }
 async function importLog(file) {

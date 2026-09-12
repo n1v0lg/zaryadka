@@ -35,10 +35,6 @@ if errs:
     print("\n".join("✗ " + e for e in errs))
     sys.exit(1)
 
-manifest = json.loads(path.with_name("manifest.webmanifest").read_text())
-if c.get("name") and manifest.get("short_name") != c["name"]:
-    print(f'! name is "{c["name"]}" but manifest.webmanifest short_name is "{manifest.get("short_name")}" (the home-screen label)')
-
 for w in ws:
     flat = [s for raw in w["intervals"] for s in [{"ex": raw} if isinstance(raw, str) else raw] * (1 if isinstance(raw, str) else raw.get("sets", 1))]
     n = w.get("sets") or len(flat)
