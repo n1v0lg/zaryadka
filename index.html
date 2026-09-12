@@ -30,11 +30,12 @@
   header { display: flex; justify-content: space-between; align-items: baseline; }
   .brand { font: 700 26px/1 var(--display); letter-spacing: .08em; text-transform: uppercase; }
   .go { display: flex; flex-direction: column; align-items: center; gap: 12px; }
-  #skipW { font-size: 14px; color: var(--mute); padding: 8px 12px; }
+  .acts { display: flex; gap: 22px; }
+  .acts button { font-size: 14px; color: var(--mute); padding: 8px 4px; }
   h1 { font: 700 60px/.9 var(--display); letter-spacing: .01em; text-transform: uppercase; margin: 10px 0 10px; }
-  .sets { list-style: none; padding: 0; margin: 20px 0 0; columns: 2; column-gap: 20px; font-size: 14px; counter-reset: s; }
-  .sets li { padding: 3px 0; break-inside: avoid; }
-  .sets li::before { counter-increment: s; content: counter(s, decimal-leading-zero); color: var(--mute); margin-right: 10px; font-variant-numeric: tabular-nums; }
+  .sets { list-style: none; padding: 0; margin: 18px 0 0; font-size: 15px; }
+  .sets li { display: flex; justify-content: space-between; gap: 16px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+  .sets li:last-child { border-bottom: 0; }
   .sets em { font-style: normal; color: var(--mute); }
   .grid { display: grid; grid-auto-flow: column; grid-template-rows: repeat(7, 11px); grid-auto-columns: 11px; gap: 3px; margin-bottom: 12px; }
   .grid i { border-radius: 2px; background: var(--line); }
@@ -45,7 +46,7 @@
   .grid i.today { outline: 1.5px solid var(--ink); outline-offset: -1.5px; }
   .grid i.fut { visibility: hidden; }
   footer { margin-top: auto; display: flex; gap: 18px; flex-wrap: wrap; font-size: 13px; color: var(--mute); }
-  footer button:hover, #skipW:hover { color: var(--ink); }
+  footer button:hover, .acts button:hover { color: var(--ink); }
   #err { white-space: pre-wrap; font-size: 13px; color: var(--work); margin: 0; }
 
   /* run */
@@ -93,7 +94,7 @@
   </section>
   <div class="go">
     <button class="pill" id="start">Start</button>
-    <button id="skipW"></button>
+    <div class="acts"><button id="skipW"></button><button id="markW">Mark done</button></div>
   </div>
   <section>
     <div class="grid" id="grid"></div>
@@ -236,14 +237,22 @@ async function load() {
 /* ---------- home ---------- */
 function renderHome() {
   const w = cfg.workouts[pick], sets = expand(w), n = cfg.workouts.length;
+  $('#markW').textContent = 'Mark done';
+  armed = clearTimeout(armed);
   $('#skipW').hidden = n < 2;
   $('#skipW').textContent = `Skip to ${cfg.workouts[(pick + 1) % n].name} →`;
   $('#wname').textContent = w.name;
   const rests = new Set(sets.map(s => s.rest));
   $('#meta').textContent = `${sets.length} sets` + (rests.size === 1 ? ` · ${sets[0].rest}s rest` : '') + ` · ≈ ${Math.round(estimate(w) / 60)} min`;
-  $('#sets').replaceChildren(...sets.map(s => {
-    const li = el('li', s.name + ' ');
-    li.append(el('em', s.type === 'reps' ? `×${s.reps}` : `${s.work}s`));
+  const blocks = []; // consecutive sets of the same exercise collapse into one row
+  sets.forEach(s => {
+    const amount = s.type === 'reps' ? `${s.reps} reps` : `${s.work}s hold`, last = blocks[blocks.length - 1];
+    if (last && last.name === s.name && last.amount === amount) last.n++;
+    else blocks.push({ name: s.name, amount, n: 1 });
+  });
+  $('#sets').replaceChildren(...blocks.map(bl => {
+    const li = el('li', bl.name);
+    li.append(el('em', `${bl.n} × ${bl.amount}`));
     return li;
   }));
   renderHistory(); renderFooter();
@@ -403,11 +412,21 @@ function pause(on) {
 function stop() { clearInterval(run.timer); run = null; wake(false); $('#pause').hidden = true; try { speechSynthesis.cancel(); } catch {} }
 
 // Saves the current session. Skipped sets are marked; sets never reached (ended early) aren't listed.
-function saveSession() {
+function logSession(w, of, sets, extra) {
   const log = store.get('log', []);
-  log.push({ d: isoDay(), t: new Date().toISOString(), w: run.w.id, n: run.w.name, of: run.plan.filter(p => p.type === 'work').length, sets: run.log });
+  log.push({ d: isoDay(), t: new Date().toISOString(), w: w.id, n: w.name, of, sets, ...extra });
   store.set('log', log);
   return log;
+}
+const saveSession = () => logSession(run.w, run.plan.filter(p => p.type === 'work').length, run.log);
+
+// Log a workout as done without running it: every set counts, timed at 0.
+function markDone() {
+  const w = cfg.workouts[pick];
+  const sets = buildPlan(w).filter(p => p.type === 'work').map(p => ({ ex: p.ex.id, ...(p.dur ? { hold: p.dur } : { reps: p.ex.reps }), s: 0 }));
+  logSession(w, sets.length, sets, { manual: true });
+  advanceQueue(pick);
+  renderHome();
 }
 const doneSets = e => e.sets.filter(x => !x.skipped).length;
 // Share of the workout actually done. Entries without "of" predate this and were only saved when complete.
@@ -448,6 +467,13 @@ async function importLog(file) {
 
 /* ---------- events ---------- */
 const skipWorkout = () => { if (!cfg) return; advanceQueue(pick); renderHome(); };
+let armed = null;
+$('#markW').onclick = () => {
+  if (!cfg) return;
+  if (armed) { armed = clearTimeout(armed); markDone(); return; }
+  $('#markW').textContent = 'Tap again to confirm';
+  armed = setTimeout(() => { armed = null; renderHome(); }, 4000);
+};
 $('#skipW').onclick = skipWorkout;
 $('#start').onclick = start;
 $('#doneBtn').onclick = e => { e.stopPropagation(); if (run && !run.paused) advance(); };
