@@ -38,7 +38,10 @@
   .sets em { font-style: normal; color: var(--mute); }
   .grid { display: grid; grid-auto-flow: column; grid-template-rows: repeat(7, 11px); grid-auto-columns: 11px; gap: 3px; margin-bottom: 12px; }
   .grid i { border-radius: 2px; background: var(--line); }
-  .grid i.on { background: var(--work); }
+  .grid i.l1 { background: color-mix(in srgb, var(--work) 30%, var(--line)); }
+  .grid i.l2 { background: color-mix(in srgb, var(--work) 55%, var(--line)); }
+  .grid i.l3 { background: color-mix(in srgb, var(--work) 78%, var(--line)); }
+  .grid i.l4 { background: var(--work); }
   .grid i.today { outline: 1.5px solid var(--ink); outline-offset: -1.5px; }
   .grid i.fut { visibility: hidden; }
   footer { margin-top: auto; display: flex; gap: 18px; flex-wrap: wrap; font-size: 13px; color: var(--mute); }
@@ -254,20 +257,23 @@ function streak(days) {
 }
 
 function renderHistory() {
-  const log = store.get('log', []), days = new Set(log.map(e => e.d)), weeks = 17;
+  const log = counted(store.get('log', [])), weeks = 17;
+  const best = new Map(); // day -> most complete session that day
+  log.forEach(e => best.set(e.d, Math.max(best.get(e.d) || 0, ratio(e))));
+  const level = r => r >= 1 ? 4 : r > 2 / 3 ? 3 : r > 1 / 3 ? 2 : 1;
   const today = new Date(); today.setHours(0, 0, 0, 0);
   const start = new Date(today); start.setDate(today.getDate() - (today.getDay() + 6) % 7 - (weeks - 1) * 7);
   const cells = [];
   for (let i = 0; i < weeks * 7; i++) {
     const d = new Date(start); d.setDate(start.getDate() + i);
     const k = isoDay(d), c = el('i');
-    c.title = k;
-    c.className = [days.has(k) && 'on', +d === +today && 'today', d > today && 'fut'].filter(Boolean).join(' ');
+    c.title = best.has(k) ? `${k} · ${Math.round(best.get(k) * 100)}%` : k;
+    c.className = [best.has(k) && 'l' + level(best.get(k)), +d === +today && 'today', d > today && 'fut'].filter(Boolean).join(' ');
     cells.push(c);
   }
   $('#grid').replaceChildren(...cells);
   const monday = new Date(today); monday.setDate(today.getDate() - (today.getDay() + 6) % 7);
-  const week = log.filter(e => e.d >= isoDay(monday)).length, s = streak(days);
+  const week = log.filter(e => e.d >= isoDay(monday)).length, s = streak(new Set(best.keys()));
   $('#stats').textContent = log.length
     ? `${log.length} session${log.length > 1 ? 's' : ''} · ${week} this week` + (s > 1 ? ` · ${s}-day streak` : '')
     : 'No sessions yet';
@@ -334,9 +340,9 @@ function start() {
   run.timer = setInterval(tick, 100);
 }
 
-function advance() {
+function advance(skipped = false) {
   const prev = run.plan[run.i];
-  if (prev && prev.type === 'work') run.log.push({ ex: prev.ex.id, ...(prev.dur ? { hold: prev.dur } : { reps: prev.ex.reps }), s: Math.round((performance.now() - run.began) * SPEED / 1000) });
+  if (prev && prev.type === 'work') run.log.push({ ex: prev.ex.id, ...(prev.dur ? { hold: prev.dur } : { reps: prev.ex.reps }), s: Math.round((performance.now() - run.began) * SPEED / 1000), ...(skipped && { skipped: true }) });
   run.i++;
   if (run.i >= run.plan.length) return finish();
   const s = run.plan[run.i], now = performance.now();
@@ -396,17 +402,28 @@ function pause(on) {
 
 function stop() { clearInterval(run.timer); run = null; wake(false); $('#pause').hidden = true; try { speechSynthesis.cancel(); } catch {} }
 
+// Saves the current session. Skipped sets are marked; sets never reached (ended early) aren't listed.
+function saveSession() {
+  const log = store.get('log', []);
+  log.push({ d: isoDay(), t: new Date().toISOString(), w: run.w.id, n: run.w.name, of: run.plan.filter(p => p.type === 'work').length, sets: run.log });
+  store.set('log', log);
+  return log;
+}
+const doneSets = e => e.sets.filter(x => !x.skipped).length;
+// Share of the workout actually done. Entries without "of" predate this and were only saved when complete.
+const ratio = e => e.of ? doneSets(e) / e.of : 1;
+const counted = log => log.filter(e => ratio(e) > 0);
+
 function finish() {
-  const w = run.w, sets = run.log, secs = Math.round(estimate(w));
+  const w = run.w, log = saveSession(), e = log[log.length - 1];
   stop();
   sfx.done(); say('Done.', 300);
-  const log = store.get('log', []);
-  log.push({ d: isoDay(), t: new Date().toISOString(), w: w.id, n: w.name, sets });
-  store.set('log', log);
   advanceQueue(cfg.workouts.indexOf(w));
-  const s = streak(new Set(log.map(e => e.d)));
+  const s = streak(new Set(counted(log).map(x => x.d)));
   $('#dname').textContent = w.name;
-  $('#dmeta').textContent = `${sets.length} sets · session ${log.length}` + (s > 1 ? ` · ${s}-day streak` : '');
+  const n = doneSets(e);
+  $('#dmeta').textContent = n === 0 ? `All ${e.of} sets skipped · not counted`
+    : (n < e.of ? `${n} of ${e.of} sets` : `${e.of} sets`) + ` · session ${counted(log).length}` + (s > 1 ? ` · ${s}-day streak` : '');
   show('done');
 }
 
@@ -438,8 +455,8 @@ $('#pauseBtn').onclick = e => { e.stopPropagation(); pause(true); };
 $('#run').onclick = () => pause(true);
 $('#pause').onclick = e => e.stopPropagation();
 $('#resume').onclick = () => pause(false);
-$('#skip').onclick = () => { pause(false); advance(); };
-$('#end').onclick = () => { stop(); show('home'); renderHome(); };
+$('#skip').onclick = () => { pause(false); advance(true); };
+$('#end').onclick = () => { if (run.log.some(x => !x.skipped)) saveSession(); stop(); show('home'); renderHome(); };
 $('#back').onclick = () => { show('home'); renderHome(); };
 $('#tSound').onclick = () => { settings.sound = !settings.sound; store.set('settings', settings); renderFooter(); };
 $('#tVoice').onclick = () => { settings.voice = !settings.voice; store.set('settings', settings); renderFooter(); };
@@ -451,7 +468,7 @@ document.addEventListener('keydown', e => {
     const s = run.plan[run.i], reps = s && s.type === 'work' && !s.dur;
     if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); if (run.paused) pause(false); else if (reps) advance(); else pause(true); }
     else if (e.key === 'Escape') pause(!run.paused);
-    else if (e.key === 'ArrowRight' && !run.paused) advance();
+    else if (e.key === 'ArrowRight' && !run.paused) advance(true);
   } else if (!$('#home').hidden && cfg) {
     if (e.key === 'ArrowRight') skipWorkout();
     if (e.key === 'Enter') start();

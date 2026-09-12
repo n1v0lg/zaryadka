@@ -51,8 +51,9 @@ Override precedence (most specific wins): interval → exercise → workout → 
 ## Workout log format (exported by the app, "Export log")
 ```json
 { "app": "zaryadka", "exported": "…", "log": [
-  { "d": "2026-09-11", "t": "2026-09-11T07:02:11.000Z", "w": "circuit", "n": "Full Circuit",
-    "sets": [ { "ex": "pushups", "reps": 10, "s": 24 }, { "ex": "hollow_man", "hold": 30, "s": 30 } ] }
+  { "d": "2026-09-11", "t": "2026-09-11T07:02:11.000Z", "w": "circuit", "n": "Full Circuit", "of": 10,
+    "sets": [ { "ex": "pushups", "reps": 10, "s": 24 }, { "ex": "hollow_man", "hold": 30, "s": 2, "skipped": true } ] }
 ] }
 ```
 `s` is the number of seconds the set took. For rep sets this tells you how fast the user got through the target, which helps when deciding whether to raise `reps`.
+`of` is the number of sets planned. Sets marked `"skipped": true` weren't done, and a session ended early lists only the sets reached, so completion = non-skipped sets ÷ `of`. Entries without `of` are complete sessions saved before this was tracked.
