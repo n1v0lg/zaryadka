@@ -5,9 +5,7 @@ A minimalist 10-minute calisthenics coach. It's a single static page with no bui
 - Queues the workouts in [`workouts.json`](workouts.json) in order. Hit **Start**, or **Skip** to move to the next one
 - **Rep sets** show a target and a big *Done* button. **Hold sets** and **rest** are timed, with a 3-2-1 beep countdown
 - Beeps, optional voice announcements ("Rest. Next, push-ups"), and it keeps the screen awake during a session
-- Turn on **Mic “done”** and say *done* to finish a rep set without touching the phone. It's the only command, and it only
-  listens during a session. Switching it on runs a quick check — say *done* once and the toggle tells you whether this
-  phone can hear you, or what stopped it
+- Turn on **Mic “done”** and say *done* to finish a rep set without touching the phone. It's the only command, and it only listens during a session
 - History is stored on the device, shown as a small calendar grid, and can be exported or imported as a JSON file
 - Tap any day in the grid to log a workout you did away from the app, or to remove one logged by mistake
 - Works offline and installs to the home screen

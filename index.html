@@ -368,35 +368,29 @@ const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 // whole utterance, so counting reps out loud — "up, down, up, down" — doesn't end the set.
 const DONE = /\bdone\b/i, LIKE_DONE = /^\W*(dun|don|dawn|down|doan|dune)\W*$/i;
 const isDone = t => DONE.test(t) || LIKE_DONE.test(t);
-let rec = null, recOn = false, recLive = false, recNote = '', heardAt = -Infinity;
-let kickT = null, watch = null, checking = null, liveSince = 0, fails = 0, cut = false;
+let rec = null, recOn = false, recLive = false, heardAt = -Infinity;
+let kickT = null, watch = null, liveSince = 0, fails = 0, cut = false;
 
 function recognizer() {
   if (rec || !SR) return rec;
   rec = new SR();
   rec.continuous = true; rec.interimResults = true; rec.lang = 'en-US';
   rec.maxAlternatives = 4;  // "done" is short, so it often lands below the top guess
-  rec.onstart = () => { recLive = true; liveSince = performance.now(); recNote = ''; micHint(); };
+  rec.onstart = () => { recLive = true; liveSince = performance.now(); };
   rec.onend = () => {
     // A session that dies as soon as it starts means something is wrong; anything else is normal churn.
     fails = cut || performance.now() - liveSince > 400 ? 0 : Math.min(fails + 1, 5);
-    cut = false; recLive = false; micHint(); kick();
+    cut = false; recLive = false; kick();
   };
   rec.onresult = e => {
     for (let i = e.resultIndex; i < e.results.length; i++) {
       const alts = e.results[i];
-      for (let k = 0; k < alts.length; k++) if (isDone(alts[k].transcript)) {
-        fails = 0;
-        return checking ? endCheck('Mic: heard you \u2713') : heardDone();
-      }
+      for (let k = 0; k < alts.length; k++) if (isDone(alts[k].transcript)) { fails = 0; return heardDone(); }
     }
   };
   rec.onerror = e => {
     recLive = false;
-    if (['not-allowed', 'service-not-allowed'].includes(e.error)) return micOff('Mic blocked'); // no permission
-    if (checking && e.error === 'no-speech') return endCheck('Mic: heard nothing');
-    recNote = ['no-speech', 'aborted'].includes(e.error) ? '' : e.error;  // routine; a new session follows
-    micHint();
+    if (['not-allowed', 'service-not-allowed'].includes(e.error)) micOff();  // no permission; everything else is churn
   };
   return rec;
 }
@@ -415,8 +409,7 @@ function kick() {  // make sure a session is running
   kickT = setTimeout(() => {
     kickT = null;
     if (!recOn || recLive) return;
-    try { rec.start(); } catch (err) { if (err.name !== 'InvalidStateError') recNote = err.name || 'no start'; }
-    micHint();
+    try { rec.start(); } catch {}
   }, fails * 400);
 }
 
@@ -429,36 +422,18 @@ function listen(on) {
   else { recLive = false; cut = true; try { r.abort(); } catch {} }
 }
 
-function micOff(note) {
-  recOn = recLive = false; clearInterval(watch); watch = null; clearTimeout(checking); checking = null;
+function micOff() {
+  recOn = recLive = false; clearInterval(watch); watch = null; clearTimeout(kickT); kickT = null;
   settings.mic = false; store.set('settings', settings);
-  renderFooter(); $('#tMic').textContent = note; setTimeout(renderFooter, 2500);
-  micHint();
+  renderFooter(); $('#tMic').textContent = 'Mic blocked'; setTimeout(renderFooter, 2500);
 }
 
-// The mic reports what it is actually doing — on the toggle during a check, and on the line
-// under the Done button during a session. A mic that isn't listening says so.
-function micHint() {
-  if (checking) { $('#tMic').textContent = recLive ? 'Mic: say “done”…' : recNote ? `Mic: ${recNote}` : 'Mic: starting…'; return; }
-  if (!run) return;
-  const s = run.plan[run.i];
-  if (!s || s.type !== 'work' || s.dur) return;
-  $('#next').textContent = !recOn ? '' : recLive ? '… or say “done”' : recNote ? `mic: ${recNote}` : 'mic: starting…';
-}
-
-// Switching the mic on asks for the microphone and then listens for one "done", so you find out
-// here whether this phone can hear you — rather than halfway through a set.
-function micCheck() {
-  if (!SR) return;
-  checking = setTimeout(() => endCheck(recNote ? `Mic: ${recNote}` : 'Mic: heard nothing'), 12000);
-  listen(true);
-  micHint();
-}
-function endCheck(note) {
-  clearTimeout(checking); checking = null;
-  if (!run) listen(false);
-  $('#tMic').textContent = note;
-  setTimeout(renderFooter, 3500);
+// Ask for the microphone at the tap, rather than in the middle of a workout.
+function askMic() {
+  const r = recognizer(); if (!r) return;
+  recOn = false;
+  try { r.start(); } catch { return; }
+  setTimeout(() => { if (!recOn) { cut = true; try { r.abort(); } catch {} } }, 1200);
 }
 
 let lock = null;
@@ -519,8 +494,7 @@ function paint(s) {
   [...$('#prog').children].forEach((seg, k) => seg.className = k < completed ? 'on' : k === completed && s.type === 'work' ? 'cur' : '');
   $('#count').textContent = `${completed + (s.type === 'work' ? 1 : 0)} / ${s.of}`; // matches the lit segments
   if (reps) { $('#timer').textContent = s.ex.reps; $('#unit').textContent = ''; }
-  $('#next').textContent = s.type === 'prep' ? amount(s.ex) : '';
-  micHint();
+  $('#next').textContent = s.type === 'prep' ? amount(s.ex) : reps && recOn ? '… or say “done”' : '';
 }
 
 function tick() {
@@ -678,10 +652,8 @@ $('#back').onclick = () => { show('home'); renderHome(); };
 $('#tSound').onclick = () => { settings.sound = !settings.sound; store.set('settings', settings); renderFooter(); };
 $('#tVoice').onclick = () => { settings.voice = !settings.voice; store.set('settings', settings); renderFooter(); };
 $('#tMic').onclick = () => {
-  settings.mic = !settings.mic; store.set('settings', settings);
-  if (checking) endCheck('');
-  renderFooter();
-  if (!settings.mic) listen(false); else if (run) listen(true); else micCheck();
+  settings.mic = !settings.mic; store.set('settings', settings); renderFooter();
+  if (!settings.mic) listen(false); else if (run) listen(true); else askMic();
 };
 $('#grid').onclick = e => { const c = nearestCell(e); if (c) openSheet(c.dataset.d); };
 $('#sheet').onclick = e => { if (e.target === $('#sheet')) closeSheet(); };
