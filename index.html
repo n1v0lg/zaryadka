@@ -347,30 +347,41 @@ const sfx = {
 function say(text, delay = 0) {
   if (!settings.voice || !('speechSynthesis' in window)) return;
   setTimeout(() => {
-    try { speechSynthesis.cancel(); const u = new SpeechSynthesisUtterance(text); u.rate = 1.05; speechSynthesis.speak(u); } catch {}
+    try {
+      speechSynthesis.cancel();
+      const u = new SpeechSynthesisUtterance(text); u.rate = 1.05;
+      u.onend = u.onerror = () => kick(200);  // speaking can end the recognition session
+      speechSynthesis.speak(u);
+    } catch {}
   }, delay);
 }
 
 /* ---------- “done” by voice ---------- */
-// The only command. It listens during a session and just taps the Done button for you.
+// The only command. It listens during a session and taps the Done button for you.
+// A recognition session is disposable: browsers end it after a silence, after each result, when a
+// spoken announcement or a beep grabs the audio, or for no reason at all. So nothing relies on one
+// staying alive — a watchdog starts a new one whenever the current one isn't running.
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-let rec = null, recOn = false, heardAt = 0;
+const DONE = /\b(done|dun|dawn|down)\b/i;  // what recognizers actually come back with for "done"
+let rec = null, recOn = false, recLive = false, recNote = '', heardAt = -Infinity, kickT = null, watch = null, checking = null;
 
 function recognizer() {
   if (rec || !SR) return rec;
   rec = new SR();
   rec.continuous = true; rec.interimResults = true; rec.lang = 'en-US';
-  rec.onresult = e => { for (let i = e.resultIndex; i < e.results.length; i++) if (/\bdone\b/i.test(e.results[i][0].transcript)) heardDone(); };
-  // It stops itself after a silence (and after each heard command); keep it up. The pause avoids restarting mid-teardown.
-  rec.onend = () => { if (recOn) setTimeout(() => { if (recOn) try { rec.start(); } catch {} }, 150); };
+  rec.onstart = () => { recLive = true; recNote = ''; micHint(); };
+  rec.onend = () => { recLive = false; micHint(); kick(250); };
+  rec.onresult = e => { for (let i = e.resultIndex; i < e.results.length; i++) if (DONE.test(e.results[i][0].transcript)) checking ? endCheck('Mic: heard you \u2713') : heardDone(); };
   rec.onerror = e => {
-    if (!['not-allowed', 'service-not-allowed', 'audio-capture'].includes(e.error)) return;
-    recOn = false; settings.mic = false; store.set('settings', settings); renderFooter();
-    $('#tMic').textContent = 'Mic blocked';   // no permission, so say so instead of just flipping back to "off"
-    setTimeout(renderFooter, 2500);
+    recLive = false;
+    if (['not-allowed', 'service-not-allowed'].includes(e.error)) return micOff('Mic blocked'); // no permission
+    if (checking && e.error === 'no-speech') return endCheck('Mic: heard nothing');
+    recNote = ['no-speech', 'aborted'].includes(e.error) ? '' : e.error;  // routine; the watchdog restarts
+    micHint();
   };
   return rec;
 }
+
 function heardDone() {
   const s = run && run.plan[run.i], now = performance.now();
   if (!s || run.paused || s.type !== 'work' || s.dur || now - heardAt < 1500) return;
@@ -378,17 +389,55 @@ function heardDone() {
   try { rec.abort(); } catch {}  // clears the transcript so the same "done" can't fire twice
   advance();
 }
-function listen(on) {
-  recOn = on && settings.mic && !!SR;
-  const r = recognizer(); if (!r) return;
-  try { recOn ? r.start() : r.stop(); } catch {}
+
+function kick(delay = 0) {  // make sure a session is running
+  clearTimeout(kickT);
+  if (!recOn || recLive) return;
+  kickT = setTimeout(() => {
+    if (!recOn || recLive) return;
+    try { rec.start(); } catch (err) { if (err.name !== 'InvalidStateError') recNote = err.name || 'no start'; }
+    micHint();
+  }, delay);
 }
-// Ask for the microphone at the tap, rather than in the middle of a workout.
-function askMic() {
+
+function listen(on) {
+  recOn = !!(on && settings.mic && SR);
   const r = recognizer(); if (!r) return;
-  recOn = false;
-  try { r.start(); } catch { return; }
-  setTimeout(() => { if (!recOn) try { r.stop(); } catch {} }, 800);
+  clearInterval(watch); watch = null;
+  if (recOn) { watch = setInterval(kick, 1500); kick(); }
+  else { recLive = false; try { r.abort(); } catch {} }
+}
+
+function micOff(note) {
+  recOn = recLive = false; clearInterval(watch); watch = null; clearTimeout(checking); checking = null;
+  settings.mic = false; store.set('settings', settings);
+  renderFooter(); $('#tMic').textContent = note; setTimeout(renderFooter, 2500);
+  micHint();
+}
+
+// The mic reports what it is actually doing — on the toggle during a check, and on the line
+// under the Done button during a session. A mic that isn't listening says so.
+function micHint() {
+  if (checking) { $('#tMic').textContent = recLive ? 'Mic: say “done”…' : recNote ? `Mic: ${recNote}` : 'Mic: starting…'; return; }
+  if (!run) return;
+  const s = run.plan[run.i];
+  if (!s || s.type !== 'work' || s.dur) return;
+  $('#next').textContent = !recOn ? '' : recLive ? '… or say “done”' : recNote ? `mic: ${recNote}` : 'mic: starting…';
+}
+
+// Switching the mic on asks for the microphone and then listens for one "done", so you find out
+// here whether this phone can hear you — rather than halfway through a set.
+function micCheck() {
+  if (!SR) return;
+  checking = setTimeout(() => endCheck(recNote ? `Mic: ${recNote}` : 'Mic: heard nothing'), 12000);
+  listen(true);
+  micHint();
+}
+function endCheck(note) {
+  clearTimeout(checking); checking = null;
+  if (!run) listen(false);
+  $('#tMic').textContent = note;
+  setTimeout(renderFooter, 3500);
 }
 
 let lock = null;
@@ -398,7 +447,7 @@ async function wake(on) {
     else if (!on && lock) { await lock.release(); lock = null; }
   } catch {}
 }
-document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && run) wake(true); });
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && run) { wake(true); kick(300); } });
 
 /* ---------- runner ---------- */
 function show(id) {
@@ -449,7 +498,8 @@ function paint(s) {
   [...$('#prog').children].forEach((seg, k) => seg.className = k < completed ? 'on' : k === completed && s.type === 'work' ? 'cur' : '');
   $('#count').textContent = `${completed + (s.type === 'work' ? 1 : 0)} / ${s.of}`; // matches the lit segments
   if (reps) { $('#timer').textContent = s.ex.reps; $('#unit').textContent = ''; }
-  $('#next').textContent = s.type === 'prep' ? amount(s.ex) : reps && recOn ? '… or say “done”' : '';
+  $('#next').textContent = s.type === 'prep' ? amount(s.ex) : '';
+  micHint();
 }
 
 function tick() {
@@ -607,8 +657,10 @@ $('#back').onclick = () => { show('home'); renderHome(); };
 $('#tSound').onclick = () => { settings.sound = !settings.sound; store.set('settings', settings); renderFooter(); };
 $('#tVoice').onclick = () => { settings.voice = !settings.voice; store.set('settings', settings); renderFooter(); };
 $('#tMic').onclick = () => {
-  settings.mic = !settings.mic; store.set('settings', settings); renderFooter();
-  if (!settings.mic) listen(false); else if (run) listen(true); else askMic();
+  settings.mic = !settings.mic; store.set('settings', settings);
+  if (checking) endCheck('');
+  renderFooter();
+  if (!settings.mic) listen(false); else if (run) listen(true); else micCheck();
 };
 $('#grid').onclick = e => { const c = nearestCell(e); if (c) openSheet(c.dataset.d); };
 $('#sheet').onclick = e => { if (e.target === $('#sheet')) closeSheet(); };
