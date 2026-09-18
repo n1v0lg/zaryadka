@@ -350,7 +350,7 @@ function say(text, delay = 0) {
     try {
       speechSynthesis.cancel();
       const u = new SpeechSynthesisUtterance(text); u.rate = 1.05;
-      u.onend = u.onerror = () => kick(200);  // speaking can end the recognition session
+      u.onend = u.onerror = () => kick();  // speaking can end the recognition session
       speechSynthesis.speak(u);
     } catch {}
   }, delay);
@@ -358,25 +358,44 @@ function say(text, delay = 0) {
 
 /* ---------- “done” by voice ---------- */
 // The only command. It listens during a session and taps the Done button for you.
-// A recognition session is disposable: browsers end it after a silence, after each result, when a
-// spoken announcement or a beep grabs the audio, or for no reason at all. So nothing relies on one
-// staying alive — a watchdog starts a new one whenever the current one isn't running.
+// A recognition session is disposable: browsers end it after a silence, after every utterance, when a
+// spoken announcement or a beep takes the audio, or for no reason at all — Chrome on Android does all
+// of these. So nothing relies on one lasting: a new session starts the instant the old one ends, and a
+// watchdog covers the cases where no "end" ever arrives. The gap between sessions is deaf time, so it
+// is kept as short as the browser allows, backing off only when a session dies on startup.
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-const DONE = /\b(done|dun|dawn|down)\b/i;  // what recognizers actually come back with for "done"
-let rec = null, recOn = false, recLive = false, recNote = '', heardAt = -Infinity, kickT = null, watch = null, checking = null;
+// "Done" counts anywhere in the phrase ("ok done", "I'm done"). Its usual mishearings only count as the
+// whole utterance, so counting reps out loud — "up, down, up, down" — doesn't end the set.
+const DONE = /\bdone\b/i, LIKE_DONE = /^\W*(dun|don|dawn|down|doan|dune)\W*$/i;
+const isDone = t => DONE.test(t) || LIKE_DONE.test(t);
+let rec = null, recOn = false, recLive = false, recNote = '', heardAt = -Infinity;
+let kickT = null, watch = null, checking = null, liveSince = 0, fails = 0, cut = false;
 
 function recognizer() {
   if (rec || !SR) return rec;
   rec = new SR();
   rec.continuous = true; rec.interimResults = true; rec.lang = 'en-US';
-  rec.onstart = () => { recLive = true; recNote = ''; micHint(); };
-  rec.onend = () => { recLive = false; micHint(); kick(250); };
-  rec.onresult = e => { for (let i = e.resultIndex; i < e.results.length; i++) if (DONE.test(e.results[i][0].transcript)) checking ? endCheck('Mic: heard you \u2713') : heardDone(); };
+  rec.maxAlternatives = 4;  // "done" is short, so it often lands below the top guess
+  rec.onstart = () => { recLive = true; liveSince = performance.now(); recNote = ''; micHint(); };
+  rec.onend = () => {
+    // A session that dies as soon as it starts means something is wrong; anything else is normal churn.
+    fails = cut || performance.now() - liveSince > 400 ? 0 : Math.min(fails + 1, 5);
+    cut = false; recLive = false; micHint(); kick();
+  };
+  rec.onresult = e => {
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      const alts = e.results[i];
+      for (let k = 0; k < alts.length; k++) if (isDone(alts[k].transcript)) {
+        fails = 0;
+        return checking ? endCheck('Mic: heard you \u2713') : heardDone();
+      }
+    }
+  };
   rec.onerror = e => {
     recLive = false;
     if (['not-allowed', 'service-not-allowed'].includes(e.error)) return micOff('Mic blocked'); // no permission
     if (checking && e.error === 'no-speech') return endCheck('Mic: heard nothing');
-    recNote = ['no-speech', 'aborted'].includes(e.error) ? '' : e.error;  // routine; the watchdog restarts
+    recNote = ['no-speech', 'aborted'].includes(e.error) ? '' : e.error;  // routine; a new session follows
     micHint();
   };
   return rec;
@@ -386,26 +405,28 @@ function heardDone() {
   const s = run && run.plan[run.i], now = performance.now();
   if (!s || run.paused || s.type !== 'work' || s.dur || now - heardAt < 1500) return;
   heardAt = now;
+  cut = true;
   try { rec.abort(); } catch {}  // clears the transcript so the same "done" can't fire twice
   advance();
 }
 
-function kick(delay = 0) {  // make sure a session is running
-  clearTimeout(kickT);
-  if (!recOn || recLive) return;
+function kick() {  // make sure a session is running
+  if (!recOn || recLive || kickT) return;
   kickT = setTimeout(() => {
+    kickT = null;
     if (!recOn || recLive) return;
     try { rec.start(); } catch (err) { if (err.name !== 'InvalidStateError') recNote = err.name || 'no start'; }
     micHint();
-  }, delay);
+  }, fails * 400);
 }
 
 function listen(on) {
   recOn = !!(on && settings.mic && SR);
   const r = recognizer(); if (!r) return;
   clearInterval(watch); watch = null;
-  if (recOn) { watch = setInterval(kick, 1500); kick(); }
-  else { recLive = false; try { r.abort(); } catch {} }
+  clearTimeout(kickT); kickT = null;
+  if (recOn) { fails = 0; watch = setInterval(kick, 600); kick(); }
+  else { recLive = false; cut = true; try { r.abort(); } catch {} }
 }
 
 function micOff(note) {
@@ -447,7 +468,7 @@ async function wake(on) {
     else if (!on && lock) { await lock.release(); lock = null; }
   } catch {}
 }
-document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && run) { wake(true); kick(300); } });
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && run) { wake(true); kick(); } });
 
 /* ---------- runner ---------- */
 function show(id) {
