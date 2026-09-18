@@ -37,7 +37,7 @@
   .sets li { display: flex; justify-content: space-between; gap: 16px; padding: 8px 0; border-bottom: 1px solid var(--line); }
   .sets li:last-child { border-bottom: 0; }
   .sets em { font-style: normal; color: var(--mute); }
-  .grid { display: grid; grid-auto-flow: column; grid-template-rows: repeat(7, 11px); grid-auto-columns: 11px; gap: 3px; margin-bottom: 12px; }
+  .grid { display: grid; grid-auto-flow: column; grid-template-rows: repeat(7, 13px); grid-auto-columns: 13px; gap: 3px; margin-bottom: 12px; cursor: pointer; }
   .grid i { border-radius: 2px; background: var(--line); }
   .grid i.l1 { background: color-mix(in srgb, var(--work) 30%, var(--line)); }
   .grid i.l2 { background: color-mix(in srgb, var(--work) 55%, var(--line)); }
@@ -79,6 +79,21 @@
   /* done */
   #done { justify-content: center; }
   #done h1 { font-size: 72px; color: var(--work); }
+
+  /* day sheet */
+  #sheet { position: fixed; inset: 0; z-index: 5; display: flex; align-items: center; justify-content: center; padding: 24px;
+           background: rgba(17,17,17,.55); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); }
+  #sheet .card { width: 100%; max-width: 360px; max-height: 84vh; overflow: auto; display: flex; flex-direction: column;
+                 background: var(--bg); color: var(--ink); border-radius: 20px; padding: 22px; }
+  #sheet .pill { height: 52px; font-size: 22px; margin-top: 14px; background: none; color: var(--ink); border: 1.5px solid var(--line); }
+  #sadd { margin-top: 16px; }
+  .rows { list-style: none; padding: 0; margin: 6px 0 0; font-size: 15px; }
+  .rows li { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+  .rows li:last-child { border-bottom: 0; }
+  .rows .name { flex: 1; text-align: left; }
+  .rows em { font-style: normal; color: var(--mute); font-size: 13px; }
+  .rows .x { color: var(--mute); font-size: 13px; padding: 8px; margin: -8px -4px; }
+  .rows .x:hover { color: var(--work); }
 </style>
 </head>
 <body>
@@ -103,6 +118,7 @@
   <footer>
     <button id="tSound"></button>
     <button id="tVoice"></button>
+    <button id="tMic"></button>
     <button id="exp">Export log</button>
     <button id="imp">Import log</button>
     <input type="file" id="file" accept="application/json,.json" hidden>
@@ -138,6 +154,16 @@
   <button class="pill" id="back">Back</button>
 </main>
 
+<div id="sheet" hidden>
+  <div class="card">
+    <div class="tag" id="sday"></div>
+    <ul class="rows" id="sdone"></ul>
+    <div class="tag" id="sadd">Log a workout</div>
+    <ul class="rows" id="spick"></ul>
+    <button class="pill" id="sclose">Close</button>
+  </div>
+</div>
+
 <script>
 'use strict';
 const $ = s => document.querySelector(s);
@@ -148,12 +174,12 @@ const store = {
 };
 // One-time copy of data saved under the app's old name. Storage keys stay fixed even if "name" in workouts.json changes.
 try { for (const k of ['log', 'next', 'settings']) { const old = localStorage.getItem('ten.' + k); if (old != null && localStorage.getItem('boris.' + k) == null) localStorage.setItem('boris.' + k, old); } } catch {}
-const settings = Object.assign({ sound: true, voice: true }, store.get('settings', {}));
+const settings = Object.assign({ sound: true, voice: true, mic: false }, store.get('settings', {}));
 const pad = n => String(n).padStart(2, '0');
 const isoDay = (d = new Date()) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 const el = (tag, text, cls) => { const e = document.createElement(tag); if (text != null) e.textContent = text; if (cls) e.className = cls; return e; };
 
-let cfg, pick = 0, run = null;
+let cfg, pick = 0, run = null, sheetDay = null;
 
 /* ---------- config ---------- */
 function validate(c) {
@@ -242,7 +268,7 @@ function renderHome() {
   $('#skipW').textContent = `Skip to ${cfg.workouts[(pick + 1) % n].name} →`;
   $('#wname').textContent = w.name;
   const rests = new Set(sets.map(s => s.rest));
-  $('#meta').textContent = `${sets.length} sets` + (rests.size === 1 ? ` · ${sets[0].rest}s rest` : '') + ` · ≈ ${Math.round(estimate(w) / 60)} min`;
+  $('#meta').textContent = `${sets.length} set${sets.length > 1 ? 's' : ''}` + (rests.size === 1 ? ` · ${sets[0].rest}s rest` : '') + ` · ≈ ${Math.round(estimate(w) / 60)} min`;
   const blocks = []; // consecutive sets of the same exercise collapse into one row
   sets.forEach(s => {
     const amount = s.type === 'reps' ? `${s.reps} reps` : `${s.work}s hold`, last = blocks[blocks.length - 1];
@@ -275,6 +301,7 @@ function renderHistory() {
   for (let i = 0; i < weeks * 7; i++) {
     const d = new Date(start); d.setDate(start.getDate() + i);
     const k = isoDay(d), c = el('i');
+    c.dataset.d = k;
     c.title = best.has(k) ? `${k} · ${Math.round(best.get(k) * 100)}%` : k;
     c.className = [best.has(k) && 'l' + level(best.get(k)), +d === +today && 'today', d > today && 'fut'].filter(Boolean).join(' ');
     cells.push(c);
@@ -290,6 +317,8 @@ function renderHistory() {
 function renderFooter() {
   $('#tSound').textContent = `Sound ${settings.sound ? 'on' : 'off'}`;
   $('#tVoice').textContent = `Voice ${settings.voice ? 'on' : 'off'}`;
+  $('#tMic').hidden = !SR;
+  $('#tMic').textContent = `Mic “done” ${settings.mic ? 'on' : 'off'}`;
 }
 
 /* ---------- sound ---------- */
@@ -322,6 +351,46 @@ function say(text, delay = 0) {
   }, delay);
 }
 
+/* ---------- “done” by voice ---------- */
+// The only command. It listens during a session and just taps the Done button for you.
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+let rec = null, recOn = false, heardAt = 0;
+
+function recognizer() {
+  if (rec || !SR) return rec;
+  rec = new SR();
+  rec.continuous = true; rec.interimResults = true; rec.lang = 'en-US';
+  rec.onresult = e => { for (let i = e.resultIndex; i < e.results.length; i++) if (/\bdone\b/i.test(e.results[i][0].transcript)) heardDone(); };
+  // It stops itself after a silence (and after each heard command); keep it up. The pause avoids restarting mid-teardown.
+  rec.onend = () => { if (recOn) setTimeout(() => { if (recOn) try { rec.start(); } catch {} }, 150); };
+  rec.onerror = e => {
+    if (!['not-allowed', 'service-not-allowed', 'audio-capture'].includes(e.error)) return;
+    recOn = false; settings.mic = false; store.set('settings', settings); renderFooter();
+    $('#tMic').textContent = 'Mic blocked';   // no permission, so say so instead of just flipping back to "off"
+    setTimeout(renderFooter, 2500);
+  };
+  return rec;
+}
+function heardDone() {
+  const s = run && run.plan[run.i], now = performance.now();
+  if (!s || run.paused || s.type !== 'work' || s.dur || now - heardAt < 1500) return;
+  heardAt = now;
+  try { rec.abort(); } catch {}  // clears the transcript so the same "done" can't fire twice
+  advance();
+}
+function listen(on) {
+  recOn = on && settings.mic && !!SR;
+  const r = recognizer(); if (!r) return;
+  try { recOn ? r.start() : r.stop(); } catch {}
+}
+// Ask for the microphone at the tap, rather than in the middle of a workout.
+function askMic() {
+  const r = recognizer(); if (!r) return;
+  recOn = false;
+  try { r.start(); } catch { return; }
+  setTimeout(() => { if (!recOn) try { r.stop(); } catch {} }, 800);
+}
+
 let lock = null;
 async function wake(on) {
   try {
@@ -343,7 +412,7 @@ function start() {
   const w = cfg.workouts[pick];
   run = { w, plan: buildPlan(w), i: -1, paused: false, log: [], end: null };
   $('#prog').replaceChildren(...run.plan.filter(p => p.type === 'work').map(() => el('i')));
-  show('run'); wake(true);
+  show('run'); wake(true); listen(true);
   advance();
   run.timer = setInterval(tick, 100);
 }
@@ -380,7 +449,7 @@ function paint(s) {
   [...$('#prog').children].forEach((seg, k) => seg.className = k < completed ? 'on' : k === completed && s.type === 'work' ? 'cur' : '');
   $('#count').textContent = `${completed + (s.type === 'work' ? 1 : 0)} / ${s.of}`; // matches the lit segments
   if (reps) { $('#timer').textContent = s.ex.reps; $('#unit').textContent = ''; }
-  $('#next').textContent = s.type === 'prep' ? amount(s.ex) : '';
+  $('#next').textContent = s.type === 'prep' ? amount(s.ex) : reps && recOn ? '… or say “done”' : '';
 }
 
 function tick() {
@@ -405,24 +474,29 @@ function pause(on) {
   if (on) { run.pausedAt = now; try { speechSynthesis.cancel(); } catch {} }
   else { const d = now - run.pausedAt; run.began += d; if (run.end) run.end += d; }
   run.paused = on;
+  listen(!on);
   $('#pause').hidden = !on;
 }
 
-function stop() { clearInterval(run.timer); run = null; wake(false); $('#pause').hidden = true; try { speechSynthesis.cancel(); } catch {} }
+function stop() { clearInterval(run.timer); run = null; wake(false); listen(false); $('#pause').hidden = true; try { speechSynthesis.cancel(); } catch {} }
 
-// Saves the current session. Skipped sets are marked; sets never reached (ended early) aren't listed.
-function logSession(w, of, sets, extra) {
-  const log = store.get('log', []);
-  log.push({ d: isoDay(), t: new Date().toISOString(), w: w.id, n: w.name, of, sets, ...extra });
+// Saves a session on the day of "when". Skipped sets are marked; sets never reached (ended early) aren't listed.
+function logSession(w, of, sets, extra, when = new Date()) {
+  const log = store.get('log', []), used = new Set(log.map(x => x.t));
+  const t = new Date(when);
+  while (used.has(t.toISOString())) t.setSeconds(t.getSeconds() + 1); // import de-dupes on "t", so keep it unique
+  const e = { d: isoDay(t), t: t.toISOString(), w: w.id, n: w.name, of, sets, ...extra };
+  log.push(e);
+  log.sort((a, b) => a.t < b.t ? -1 : 1);
   store.set('log', log);
-  return log;
+  return e;
 }
 const saveSession = () => logSession(run.w, run.plan.filter(p => p.type === 'work').length, run.log);
 
-// Log a workout as done without running it: every set counts, timed at 0.
+// A workout logged without running it: every set counts, timed at 0.
+const manualSets = w => buildPlan(w).filter(p => p.type === 'work').map(p => ({ ex: p.ex.id, ...(p.dur ? { hold: p.dur } : { reps: p.ex.reps }), s: 0 }));
 function markDone() {
-  const w = cfg.workouts[pick];
-  const sets = buildPlan(w).filter(p => p.type === 'work').map(p => ({ ex: p.ex.id, ...(p.dur ? { hold: p.dur } : { reps: p.ex.reps }), s: 0 }));
+  const w = cfg.workouts[pick], sets = manualSets(w);
   logSession(w, sets.length, sets, { manual: true });
   advanceQueue(pick);
   renderHome();
@@ -433,7 +507,7 @@ const ratio = e => e.of ? doneSets(e) / e.of : 1;
 const counted = log => log.filter(e => ratio(e) > 0);
 
 function finish() {
-  const w = run.w, log = saveSession(), e = log[log.length - 1];
+  const w = run.w, e = saveSession(), log = store.get('log', []);
   stop();
   sfx.done(); say('Done.', 300);
   advanceQueue(cfg.workouts.indexOf(w));
@@ -441,8 +515,55 @@ function finish() {
   $('#dname').textContent = w.name;
   const n = doneSets(e);
   $('#dmeta').textContent = n === 0 ? `All ${e.of} sets skipped · not counted`
-    : (n < e.of ? `${n} of ${e.of} sets` : `${e.of} sets`) + ` · session ${counted(log).length}` + (s > 1 ? ` · ${s}-day streak` : '');
+    : (n < e.of ? `${n} of ${e.of} sets` : `${e.of} set${e.of > 1 ? 's' : ''}`) + ` · session ${counted(log).length}` + (s > 1 ? ` · ${s}-day streak` : '');
   show('done');
+}
+
+/* ---------- day sheet ---------- */
+// Tap a square in the grid to log a workout on that day, or to drop one logged by mistake.
+const noon = day => new Date(day + 'T12:00:00'); // midday keeps the entry on that day whatever the timezone does
+const entryMeta = e => e.manual ? 'logged' : !e.of ? 'session'
+  : doneSets(e) < e.of ? `${doneSets(e)} of ${e.of} sets` : `${e.of} set${e.of > 1 ? 's' : ''}`;
+let armX = null;
+
+function openSheet(day) { sheetDay = day; armX = null; renderSheet(); $('#sheet').hidden = false; }
+function closeSheet() { sheetDay = armX = null; $('#sheet').hidden = true; }
+
+function renderSheet() {
+  const day = sheetDay;
+  $('#sday').textContent = noon(day).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' })
+    + (day === isoDay() ? ' \u00b7 today' : '');
+  $('#sdone').replaceChildren(...store.get('log', []).filter(e => e.d === day).map(e => {
+    const li = el('li'), x = el('button', armX === e.t ? 'Remove?' : '\u2715', 'x');
+    x.onclick = () => { if (armX !== e.t) { armX = e.t; renderSheet(); return; } removeEntry(e.t); };
+    li.append(el('span', e.n || e.w, 'name'), el('em', entryMeta(e)), x);
+    return li;
+  }));
+  const ws = cfg ? cfg.workouts : [];
+  $('#sadd').hidden = !ws.length;
+  $('#spick').replaceChildren(...ws.map(w => {
+    const li = el('li'), b = el('button', w.name, 'name'), sets = manualSets(w);
+    b.onclick = () => { logSession(w, sets.length, sets, { manual: true }, noon(day)); closeSheet(); renderHistory(); };
+    li.append(b, el('em', `${sets.length} set${sets.length > 1 ? 's' : ''}`));
+    return li;
+  }));
+}
+
+function removeEntry(t) {
+  store.set('log', store.get('log', []).filter(e => e.t !== t));
+  armX = null; renderSheet(); renderHistory();
+}
+
+// The squares are small, so take the nearest one rather than only a direct hit.
+function nearestCell(ev) {
+  let best = null, bd = Infinity;
+  for (const c of $('#grid').children) {
+    if (c.classList.contains('fut')) continue;
+    const r = c.getBoundingClientRect();
+    const d = Math.hypot(Math.max(r.left - ev.clientX, 0, ev.clientX - r.right), Math.max(r.top - ev.clientY, 0, ev.clientY - r.bottom));
+    if (d < bd) { bd = d; best = c; }
+  }
+  return bd <= 8 ? best : null;
 }
 
 /* ---------- log import/export ---------- */
@@ -485,10 +606,18 @@ $('#end').onclick = () => { if (run.log.some(x => !x.skipped)) saveSession(); st
 $('#back').onclick = () => { show('home'); renderHome(); };
 $('#tSound').onclick = () => { settings.sound = !settings.sound; store.set('settings', settings); renderFooter(); };
 $('#tVoice').onclick = () => { settings.voice = !settings.voice; store.set('settings', settings); renderFooter(); };
+$('#tMic').onclick = () => {
+  settings.mic = !settings.mic; store.set('settings', settings); renderFooter();
+  if (!settings.mic) listen(false); else if (run) listen(true); else askMic();
+};
+$('#grid').onclick = e => { const c = nearestCell(e); if (c) openSheet(c.dataset.d); };
+$('#sheet').onclick = e => { if (e.target === $('#sheet')) closeSheet(); };
+$('#sclose').onclick = closeSheet;
 $('#exp').onclick = exportLog;
 $('#imp').onclick = () => $('#file').click();
 $('#file').onchange = e => { if (e.target.files[0]) importLog(e.target.files[0]); e.target.value = ''; };
 document.addEventListener('keydown', e => {
+  if (!$('#sheet').hidden) { if (e.key === 'Escape') closeSheet(); return; }
   if (run) {
     const s = run.plan[run.i], reps = s && s.type === 'work' && !s.dur;
     if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); if (run.paused) pause(false); else if (reps) advance(); else pause(true); }

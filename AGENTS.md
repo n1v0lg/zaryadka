@@ -57,4 +57,4 @@ Override precedence (most specific wins): interval → exercise → workout → 
 ```
 `s` is the number of seconds the set took. For rep sets this tells you how fast the user got through the target, which helps when deciding whether to raise `reps`.
 `of` is the number of sets planned. Sets marked `"skipped": true` weren't done, and a session ended early lists only the sets reached, so completion = non-skipped sets ÷ `of`. Entries without `of` are complete sessions saved before this was tracked.
-`"manual": true` marks a workout the user ticked off on the home screen without running it; every set is recorded as done with `s: 0`.
+`"manual": true` marks a workout that wasn't run: ticked off with "Mark done", or logged by tapping a day in the history grid. Every set is recorded as done with `s: 0`.
